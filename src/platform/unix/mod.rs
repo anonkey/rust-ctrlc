@@ -6,10 +6,10 @@
 // at your option. All files in the project carrying such
 // notice may not be copied, modified, or distributed except
 // according to those terms.
-
 use crate::error::Error as CtrlcError;
 use nix::unistd;
-use std::os::unix::io::RawFd;
+use std::os::fd::FromRawFd;
+use std::os::{fd::OwnedFd, unix::io::RawFd};
 
 static mut PIPE: (RawFd, RawFd) = (-1, -1);
 
@@ -22,7 +22,7 @@ pub type Signal = nix::sys::signal::Signal;
 extern "C" fn os_handler(_: nix::libc::c_int) {
     // Assuming this always succeeds. Can't really handle errors in any meaningful way.
     unsafe {
-        let _ = unistd::write(PIPE.1, &[0u8]);
+        let _ = unistd::write(OwnedFd::from_raw_fd(PIPE.1), &[0u8]);
     }
 }
 
@@ -36,6 +36,8 @@ extern "C" fn os_handler(_: nix::libc::c_int) {
     target_os = "nto",
 ))]
 fn pipe2(flags: nix::fcntl::OFlag) -> nix::Result<(RawFd, RawFd)> {
+    use std::os::fd::AsRawFd;
+
     use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 
     let pipe = unistd::pipe()?;
@@ -44,21 +46,21 @@ fn pipe2(flags: nix::fcntl::OFlag) -> nix::Result<(RawFd, RawFd)> {
 
     if flags.contains(OFlag::O_CLOEXEC) {
         res = res
-            .and_then(|_| fcntl(pipe.0, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)))
-            .and_then(|_| fcntl(pipe.1, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)));
+            .and_then(|_| fcntl(pipe.0.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)))
+            .and_then(|_| fcntl(pipe.1.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC)));
     }
 
     if flags.contains(OFlag::O_NONBLOCK) {
         res = res
-            .and_then(|_| fcntl(pipe.0, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)))
-            .and_then(|_| fcntl(pipe.1, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)));
+            .and_then(|_| fcntl(pipe.0.as_raw_fd(), FcntlArg::F_SETFL(OFlag::O_NONBLOCK)))
+            .and_then(|_| fcntl(pipe.1.as_raw_fd(), FcntlArg::F_SETFL(OFlag::O_NONBLOCK)));
     }
 
     match res {
-        Ok(_) => Ok(pipe),
+        Ok(_) => Ok((pipe.0.as_raw_fd(), pipe.1.as_raw_fd())),
         Err(e) => {
-            let _ = unistd::close(pipe.0);
-            let _ = unistd::close(pipe.1);
+            let _ = unistd::close(pipe.0.as_raw_fd());
+            let _ = unistd::close(pipe.1.as_raw_fd());
             Err(e)
         }
     }

@@ -41,3 +41,6 @@ signal-hook = "0.3"
 
 [badges]
 maintenance = { status = "passively-maintained" }
+
+[patch.crates-io]
+nix = { path = "../nix" }
